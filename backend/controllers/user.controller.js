@@ -1,9 +1,13 @@
 import { User } from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import getDataUri from "../utils/datauri.js";
+import cloudinary from "../utils/cloudinary.js";
+
 export const register = async (req, res) => {
     try {
         const { fullname, email, phoneNumber, password, role } = req.body;
+         
         if (!fullname || !email || !phoneNumber || !password || !role) {
             return res.status(400).json({
                 message: "Something is missing",
@@ -11,16 +15,8 @@ export const register = async (req, res) => {
             });
         };
         const file = req.file;
-        
-        // Convert phoneNumber to number if it's a string
-        const phoneNumberNum = typeof phoneNumber === 'string' ? parseInt(phoneNumber, 10) : phoneNumber;
-        
-        if (isNaN(phoneNumberNum)) {
-            return res.status(400).json({
-                message: "Invalid phone number",
-                success: false
-            });
-        }
+        const fileUri = getDataUri(file);
+        const cloudResponse = await cloudinary.uploader.upload(fileUri.content);
 
         const user = await User.findOne({ email });
         if (user) {
@@ -34,22 +30,20 @@ export const register = async (req, res) => {
         await User.create({
             fullname,
             email,
-            phoneNumber: phoneNumberNum,
+            phoneNumber,
             password: hashedPassword,
             role,
+            profile:{
+                profilePhoto:cloudResponse.secure_url,
+            }
         });
 
         return res.status(201).json({
             message: "Account created successfully.",
             success: true
         });
-
-        } catch (error) {
+    } catch (error) {
         console.log(error);
-        return res.status(500).json({
-            message: error.message || "Internal server error",
-            success: false
-        });
     }
 }
 export const login = async (req, res) => {
@@ -98,17 +92,13 @@ export const login = async (req, res) => {
             profile: user.profile
         }
 
-        return res.status(200).cookie("token", token, { maxAge: 1 * 24 * 60 * 60 * 1000, httpOnly: true, sameSite: 'strict' }).json({
+        return res.status(200).cookie("token", token, { maxAge: 1 * 24 * 60 * 60 * 1000, httpsOnly: true, sameSite: 'strict' }).json({
             message: `Welcome back ${user.fullname}`,
             user,
             success: true
         })
     } catch (error) {
         console.log(error);
-        return res.status(500).json({
-            message: error.message || "Internal server error",
-            success: false
-        });
     }
 }
 export const logout = async (req, res) => {
@@ -124,12 +114,17 @@ export const logout = async (req, res) => {
 export const updateProfile = async (req, res) => {
     try {
         const { fullname, email, phoneNumber, bio, skills } = req.body;
+        
         const file = req.file;
-       
+        // cloudinary ayega idhar
+        const fileUri = getDataUri(file);
+        const cloudResponse = await cloudinary.uploader.upload(fileUri.content);
+
+
 
         let skillsArray;
         if(skills){
-           skillsArray = skills.split(",");
+            skillsArray = skills.split(",");
         }
         const userId = req.id; // middleware authentication
         let user = await User.findById(userId);
@@ -140,12 +135,19 @@ export const updateProfile = async (req, res) => {
                 success: false
             })
         }
-        
-        if(fullname) user.fullname = fullname 
-        if(email) user.email=email 
-        if(phoneNumber) user.phoneNumber=phoneNumber
+        // updating data
+        if(fullname) user.fullname = fullname
+        if(email) user.email = email
+        if(phoneNumber)  user.phoneNumber = phoneNumber
         if(bio) user.profile.bio = bio
         if(skills) user.profile.skills = skillsArray
+      
+        // resume comes later here...
+        if(cloudResponse){
+            user.profile.resume = cloudResponse.secure_url // save the cloudinary url
+            user.profile.resumeOriginalName = file.originalname // Save the original file name
+        }
+
 
         await user.save();
 
